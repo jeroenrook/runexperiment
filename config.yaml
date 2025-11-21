@@ -1,0 +1,13 @@
+name: drift
+targetdir: results_2/
+sbatch_array_limit: 128
+sbatch:
+  partition: normal
+  nodes: 1
+  ntasks: 1
+  mem: 2gb
+  cpus-per-task: 1
+  time: 0-00:20:00
+#  qos: express
+#  nice: 100
+#  exclusive: user

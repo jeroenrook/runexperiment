@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "runexperiment"
+version = "0.1.0"
+description = "Experiment launcher with local and SLURM execution support."
+readme = "README.md"
+authors = [{ name = "Jeroen" }]
+requires-python = ">=3.9"
+dependencies = [
+    "pyyaml",
+    "tqdm",
+    "psutil",
+]
+
+[tool.setuptools]
+packages = ["runexperiment"]
+
+[project.scripts]
+runexperiment = "runexperiment.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "ruff",
+    "black",
+    "pytest",
+]
