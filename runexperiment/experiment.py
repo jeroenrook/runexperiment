@@ -12,6 +12,7 @@ import multiprocessing as mp
 import psutil
 import shlex
 import sys
+from tqdm import tqdm
 
 from .action import Action
 from .utils import get_cpus, run_local_worker
@@ -485,7 +486,12 @@ class Experiment(ABC):
                 for r in run_arguments
             ]
             with mp.Pool(max(get_cpus() - 1, 1)) as pool:
-                pool.map(run_local_worker, run_commands)
+                for _ in tqdm(
+                    pool.imap_unordered(run_local_worker, run_commands),
+                    total=len(run_commands),
+                    desc="Running locally",
+                ):
+                    pass
             return
 
         chunksize = 1000

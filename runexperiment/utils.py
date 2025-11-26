@@ -19,7 +19,6 @@ def run_local_worker(command: str) -> Tuple[int, str, str]:
     """
     Run a shell command and capture return code, stdout and stderr.
     """
-    print(command)
     process = subprocess.run(
         command,
         shell=True,
