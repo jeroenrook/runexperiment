@@ -1,13 +1,8 @@
-name: drift
-targetdir: results_2/
-sbatch_array_limit: 128
+# Default configuration for runexperiment
+# Values here are merged into CLI args if not provided explicitly.
 sbatch:
-  partition: normal
-  nodes: 1
-  ntasks: 1
-  mem: 2gb
-  cpus-per-task: 1
-  time: 0-00:20:00
-#  qos: express
-#  nice: 100
-#  exclusive: user
+  time: "01:00:00"
+  mem: "4G"
+  cpus-per-task: "1"
+expdir: "./output"
+targetdir: "./results"

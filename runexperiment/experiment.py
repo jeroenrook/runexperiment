@@ -576,7 +576,9 @@ class Experiment(ABC):
             f"[START RUN] Current Time: {time.strftime('%Y-%m-%d %H:%M:%S')}, CPU Usage: {psutil.cpu_percent()}%, Memory Usage: {psutil.virtual_memory().percent}%"
         )
 
-        result = action.fn(actual_experiment, self, **action_arguments)
+        result = action.fn(
+            actual_experiment, self, **action_arguments, experiment_name=experiment_name
+        )
 
         print(
             f"[END RUN] Current Time: {time.strftime('%Y-%m-%d %H:%M:%S')}, CPU Usage: {psutil.cpu_percent()}%, Memory Usage: {psutil.virtual_memory().percent}%"
