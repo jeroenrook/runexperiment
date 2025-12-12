@@ -93,6 +93,14 @@ class Experiment(ABC):
         )
 
         parser.add_argument(
+            "--sbatch-commands-per-task",
+            required=False,
+            type=int,
+            dest="sbatch_commands_per_task",
+            help="Number of run commands to execute sequentially in a single SLURM array task.",
+        )
+
+        parser.add_argument(
             "-n",
             "--name",
             default=None,
@@ -214,6 +222,9 @@ class Experiment(ABC):
                         if not hasattr(args, key) or getattr(args, key) is None:
                             logging.info(f"Read value for {key} from config file.")
                             setattr(args, key, value)
+
+        if getattr(args, "sbatch_commands_per_task", None) is None:
+            args.sbatch_commands_per_task = 1
 
         if args.expdir is None:
             args.expdir = "./output"
@@ -494,13 +505,16 @@ class Experiment(ABC):
                     pass
             return
 
+        commands_per_task = max(1, getattr(args, "sbatch_commands_per_task", 1))
+        total_tasks = (len(run_arguments) + commands_per_task - 1) // commands_per_task
+
         chunksize = 1000
         chunkid = 0
         timestamp = int(time.time())
-        while chunkid * chunksize < len(run_arguments):
+        while chunkid * chunksize < total_tasks:
             launch_name = f"launch_{timestamp}_{chunkid}.sh"
-            chunk_start = chunkid * chunksize
-            chunk_end = min(chunk_start + chunksize - 1, len(run_arguments) - 1)
+            chunk_start_task = chunkid * chunksize
+            chunk_end_task = min(chunk_start_task + chunksize - 1, total_tasks - 1)
 
             sbatch_args = []
             sbatch_args.append(f"--job-name=exp_{args.name}_{chunkid}")
@@ -508,29 +522,40 @@ class Experiment(ABC):
                 sbatch_args.append(f"--{sbatchkey}={sbatchval}")
             logoutput = exp_dir_path.joinpath(f"{args.name}_{chunkid}_%a.out")
             sbatch_args.append(f"--output={logoutput}")
-            sbatch_args.append(f"--array=0-{chunk_end - chunk_start}")
-            if hasattr(args, "sbatch_array_limit"):
+            sbatch_args.append(f"--array=0-{chunk_end_task - chunk_start_task}")
+            if getattr(args, "sbatch_array_limit", None) is not None:
                 sbatch_args[-1] += f"%{args.sbatch_array_limit}"
 
             script = ["#!/usr/bin/bash"]
             script += [f"#SBATCH {line}" for line in sbatch_args]
             script.append("")
+            chunk_start_arg = chunk_start_task * commands_per_task
+            chunk_end_arg = min(
+                (chunk_end_task + 1) * commands_per_task, len(run_arguments)
+            )
+            chunk_run_arguments = run_arguments[chunk_start_arg:chunk_end_arg]
             script.append(
-                'experiment=( "'
-                + '" \\\n"'.join(run_arguments[chunk_start : chunk_end + 1])
-                + '" )'
+                'experiment=( "' + '" \\\n"'.join(chunk_run_arguments) + '" )'
             )
             script.append("")
             script.append(
                 "echo \"START runexperiment call at $(date '+%Y-%m-%d %H:%M:%S')\""
             )
+            script.append(f"COMMANDS_PER_TASK={commands_per_task}")
+            script.append("TOTAL_COMMANDS=${#experiment[@]}")
+            script.append("task_start=$(( SLURM_ARRAY_TASK_ID * COMMANDS_PER_TASK ))")
+            script.append("task_end=$(( task_start + COMMANDS_PER_TASK - 1 ))")
             script.append(
-                f"{self._invocation} --action {args.action} {pass_args_on} run ${{experiment[$SLURM_ARRAY_TASK_ID]}}"
+                "for (( cmd_index=task_start; cmd_index<=task_end && cmd_index<TOTAL_COMMANDS; cmd_index++ )); do"
             )
-            if len(run_arguments) > chunk_end + 1:
+            script.append(
+                f"    {self._invocation} --action {args.action} {pass_args_on} run ${{experiment[$cmd_index]}}"
+            )
+            script.append("done")
+            if total_tasks > chunk_end_task + 1:
                 script.append("")
                 script.append(
-                    f'if [[ "$SLURM_ARRAY_TASK_ID" -eq {chunk_end - chunk_start} ]]\nthen'
+                    f'if [[ "$SLURM_ARRAY_TASK_ID" -eq {chunk_end_task - chunk_start_task} ]]\nthen'
                 )
                 script.append(f"\tsbatch launch_{timestamp}_{chunkid+1}.sh")
                 script.append("fi")
