@@ -34,7 +34,6 @@ class Experiment(ABC):
 
         self.args = None
         self._invocation = self._detect_invocation()
-
         self.main()
 
     def _detect_invocation(self) -> str:
