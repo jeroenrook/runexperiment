@@ -54,5 +54,3 @@ python my_experiment.py run --action train --dataset a --seed 0
 
 See `runexperiment/experiment.py` for the full set of CLI options (including SLURM arguments) and an end-to-end example.
 When launching to SLURM, `--sbatch-commands-per-task N` will sequentially execute N run commands inside each array task (default 1) so you can reduce scheduler overhead.
-
-The earlier DriftAS-specific setup now lives in `examples/driftas_experiment.py`; it can be run unchanged if the `driftas` dependency is available.
