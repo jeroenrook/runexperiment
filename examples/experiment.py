@@ -19,5 +19,5 @@ def run_task(experiment, exp: Experiment):
 
 
 if __name__ == "__main__":
-    actions = {"run_task": Action("run_task", run_task)}
+    actions = {"run_task": Action("run_task", run_task, check_complete=True)}
     Experiment(exp_space, actions)

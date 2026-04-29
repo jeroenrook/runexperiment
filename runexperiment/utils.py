@@ -7,7 +7,8 @@ __all__ = ["get_cpus", "run_local_worker"]
 
 def get_cpus() -> int:
     """
-    Get the number of CPUs per task in a SLURM job or fallback to local CPU count.
+    Get the number of CPUs per task in a SLURM job or fallback to local
+    CPU count.
     """
     cpus_per_task = os.getenv("SLURM_CPUS_PER_TASK")
     if cpus_per_task is not None:

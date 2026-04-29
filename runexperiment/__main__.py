@@ -59,7 +59,7 @@ def _config_template() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="runexperiment",
-        description="Utilities for running experiment grids locally or on SLURM.",
+        description=("Utilities for running experiment grids locally or on SLURM."),
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -70,7 +70,7 @@ def main() -> None:
         "--dest",
         type=Path,
         default=Path("."),
-        help="Directory to place generated files (default: current directory).",
+        help=("Directory to place generated files" " (default: current directory)."),
     )
     init_parser.add_argument(
         "--force",
@@ -89,7 +89,10 @@ def main() -> None:
         config_path = dest / "config.yaml"
 
         _write_file(
-            experiment_path, _experiment_template(), executable=True, force=args.force
+            experiment_path,
+            _experiment_template(),
+            executable=True,
+            force=args.force,
         )
         logging.info("Created %s", experiment_path)
 
@@ -100,7 +103,8 @@ def main() -> None:
     print(
         "runexperiment is packaged as a library. "
         "Import Action/Experiment and define your own experiment script "
-        "(see README.md). For the previous DriftAS setup, run examples/driftas_experiment.py. "
+        "(see README.md). For the previous DriftAS setup,"
+        " run examples/driftas_experiment.py. "
         "Run `runexperiment init` to scaffold a starter script and config."
     )
 

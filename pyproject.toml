@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "runexperiment"
@@ -14,9 +14,6 @@ dependencies = [
     "tqdm",
     "psutil",
 ]
-
-[tool.setuptools]
-packages = ["runexperiment"]
 
 [project.scripts]
 runexperiment = "runexperiment.__main__:main"

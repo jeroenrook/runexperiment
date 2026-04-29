@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from abc import ABC
+import importlib.resources
 import itertools
 import argparse
 import pickle
@@ -11,6 +12,7 @@ import copy
 import multiprocessing as mp
 import psutil
 import shlex
+import shutil
 import sys
 from tqdm import tqdm
 
@@ -20,7 +22,10 @@ from .utils import get_cpus, run_local_worker
 
 class Experiment(ABC):
     def __init__(
-        self, experiment_space: dict, action_space: dict, pipelines: dict = None
+        self,
+        experiment_space: dict,
+        action_space: dict,
+        pipelines: dict = None,
     ):
         self.experiment_space = experiment_space
         self.action_space = action_space
@@ -32,10 +37,13 @@ class Experiment(ABC):
         self.main()
 
     def _detect_invocation(self) -> str:
-        """Return the python command that should re-run this experiment script."""
+        """Return the python command that should re-run this
+        experiment script."""
         main_file = getattr(sys.modules.get("__main__"), "__file__", None)
         if main_file:
-            return f"{shlex.quote(sys.executable)} {shlex.quote(str(Path(main_file).resolve()))}"
+            exe = shlex.quote(sys.executable)
+            script = shlex.quote(str(Path(main_file).resolve()))
+            return f"{exe} {script}"
         return f"{shlex.quote(sys.executable)} -m runexperiment"
 
     # MAIN
@@ -52,16 +60,18 @@ class Experiment(ABC):
             self.run()
         elif modus == "pipeline":
             self.pipeline()
+        elif modus == "init":
+            self.init_config()
+        elif modus == "truncate":
+            self.truncate()
 
     def _parse_arguments(self):
-        parser = argparse.ArgumentParser(
-            prog="Experiment Controller",
-            description="Generate, launch, validate and analyse experiments",
-        )
+        # Shared arguments that can appear before or after the subcommand.
+        shared = argparse.ArgumentParser(add_help=False)
 
-        parser.add_argument("-c", "--config", default="config.yaml")
+        shared.add_argument("-c", "--config", default="config.yaml")
 
-        parser.add_argument(
+        shared.add_argument(
             "-d",
             "--expdir",
             required=False,
@@ -70,7 +80,7 @@ class Experiment(ABC):
             type=Path,
         )
 
-        parser.add_argument(
+        shared.add_argument(
             "-t",
             "--targetdir",
             required=False,
@@ -79,7 +89,7 @@ class Experiment(ABC):
             type=Path,
         )
 
-        parser.add_argument(
+        shared.add_argument(
             "--sbatch",
             required=False,
             nargs=2,
@@ -88,19 +98,25 @@ class Experiment(ABC):
             default=[],
         )
 
-        parser.add_argument(
-            "--sbatch-array-limit", required=False, type=int, dest="sbatch_array_limit"
+        shared.add_argument(
+            "--sbatch-array-limit",
+            required=False,
+            type=int,
+            dest="sbatch_array_limit",
         )
 
-        parser.add_argument(
+        shared.add_argument(
             "--sbatch-commands-per-task",
             required=False,
             type=int,
             dest="sbatch_commands_per_task",
-            help="Number of run commands to execute sequentially in a single SLURM array task.",
+            help=(
+                "Number of run commands to execute sequentially"
+                " in a single SLURM array task."
+            ),
         )
 
-        parser.add_argument(
+        shared.add_argument(
             "-n",
             "--name",
             default=None,
@@ -108,7 +124,7 @@ class Experiment(ABC):
             help="Name of the experiment",
         )
 
-        parser.add_argument(
+        shared.add_argument(
             "-a",
             "--action",
             default=list(self.action_space.keys())[0],
@@ -117,15 +133,29 @@ class Experiment(ABC):
             dest="action",
         )
 
-        parser.set_defaults(dummy=True)
-        parser.add_argument("--dummy", action="store_false")
+        shared.set_defaults(dummy=True)
+        shared.add_argument("--dummy", action="store_false")
+
+        parser = argparse.ArgumentParser(
+            prog="Experiment Controller",
+            description="Generate, launch, validate and analyse experiments",
+            parents=[shared],
+        )
 
         subparsers = parser.add_subparsers(
             help="The experiment modus: [launch, run]", dest="modus"
         )
 
-        launch_parser = subparsers.add_parser("launch")
-        run_parser = subparsers.add_parser("run")
+        launch_parser = subparsers.add_parser("launch", parents=[shared])
+        run_parser = subparsers.add_parser("run", parents=[shared])
+        subparsers.add_parser(
+            "init", parents=[shared], help="Create a default config.yaml"
+        )
+        subparsers.add_parser(
+            "truncate",
+            parents=[shared],
+            help="Remove the output and results directories",
+        )
 
         launch_parser.set_defaults(repair=False)
         launch_parser.add_argument(
@@ -140,14 +170,16 @@ class Experiment(ABC):
             "-f", "--repair", help="Repair failed results", action="store_true"
         )
 
-        launch_parser.set_defaults(runlocal=False)
-        launch_parser.add_argument("--local", action="store_true", dest="runlocal")
+        launch_parser.add_argument(
+            "--local", action="store_true", default=None, dest="runlocal"
+        )
 
         for action_key, action in self.action_space.items():
             if len(action.expand) > 0:
                 for argument in action.expand:
+                    arg_name = self.get_action_argument_name(action_key, argument)
                     launch_parser.add_argument(
-                        f"--{self.get_action_argument_name(action_key, argument)}",
+                        f"--{arg_name}",
                         required=False,
                         action="append",
                         nargs="+",
@@ -155,7 +187,7 @@ class Experiment(ABC):
                     )
 
                     run_parser.add_argument(
-                        f"--{self.get_action_argument_name(action_key, argument)}",
+                        f"--{arg_name}",
                         required=False,
                         default=None,
                     )
@@ -173,6 +205,14 @@ class Experiment(ABC):
             run_parser.add_argument(f"--{key}", required=False, choices=option_names)
 
         args = parser.parse_args()
+
+        if args.modus is None:
+            parser.print_help()
+            sys.exit(0)
+
+        if args.modus == "init":
+            return args
+
         action = self.action_space[args.action]
 
         if args.modus == "launch":
@@ -215,7 +255,9 @@ class Experiment(ABC):
                         for sbatchkey, sbatchval in value.items():
                             if sbatchkey not in sbatchkeys:
                                 logging.info(
-                                    f"Read sbatch value for {sbatchkey}={sbatchval} from config file."
+                                    "Read sbatch value for "
+                                    f"{sbatchkey}={sbatchval}"
+                                    " from config file."
                                 )
                                 args.sbatch_args.append((sbatchkey, sbatchval))
                     else:
@@ -233,6 +275,9 @@ class Experiment(ABC):
             args.targetdir = "./results"
         args.targetdir = Path(args.targetdir)
 
+        if args.modus == "truncate":
+            return args
+
         basename = "" if args.name is None else args.name
         nameargs = [basename, args.modus, args.action]
         for key in self.experiment_space.keys():
@@ -247,15 +292,15 @@ class Experiment(ABC):
                     nameargs.append("multiple")
             elif args.modus == "run":
                 nameargs.append(getattr(args, key))
+
         args.name = "_".join(nameargs)
 
         if args.modus == "run" and len(action.expand) > 0:
             for argument in action.expand:
-                if not hasattr(
-                    args, self.get_action_argument_name(args.action, argument)
-                ):
+                arg_name = self.get_action_argument_name(args.action, argument)
+                if not hasattr(args, arg_name):
                     raise ValueError(
-                        f"action argument '{self.get_action_argument_name(args.action, argument)}' missing. Aborting run!"
+                        f"action argument '{arg_name}'" " missing. Aborting run!"
                     )
 
         return args
@@ -339,8 +384,12 @@ class Experiment(ABC):
         if len(action.expand) == 0:
             result_file = self.get_targetdir(action.name).joinpath(f"{exp_name}.pickle")
             if not result_file.exists():
-                message = f"File '{result_file}' does not exist. Please launch the action {action.name} on {exp_name} first."
-                raise FileExistsError(message)
+                message = (
+                    f"File '{result_file}' does not exist."
+                    f" Please launch the action {action.name}"
+                    f" on {exp_name} first."
+                )
+                raise FileNotFoundError(message)
             with open(result_file, "rb") as fh:
                 result = pickle.load(fh)
 
@@ -354,8 +403,12 @@ class Experiment(ABC):
         else:
             result_dir = self.get_targetdir(action.name).joinpath(f"{exp_name}/")
             if not result_dir.exists():
-                message = f"Directory '{result_dir}' does not exist. Please launch the action {action.name} on {exp_name} first."
-                raise FileExistsError(message)
+                message = (
+                    f"Directory '{result_dir}' does not exist."
+                    f" Please launch the action {action.name}"
+                    f" on {exp_name} first."
+                )
+                raise FileNotFoundError(message)
             result = None
             for result_file in result_dir.iterdir():
                 with open(result_file, "rb") as fh:
@@ -377,9 +430,8 @@ class Experiment(ABC):
                     result["expand_arguments"] = list(result["expand_arguments"].keys())
                     result["run_result"] = {}
 
-                result["run_result"][tuple(res["expand_arguments"].items())] = res[
-                    "run_result"
-                ]
+                key = tuple(res["expand_arguments"].items())
+                result["run_result"][key] = res["run_result"]
 
             return result
 
@@ -445,19 +497,20 @@ class Experiment(ABC):
                                 if action.check_complete(result["run_result"]):
                                     continue
                                 else:
-                                    print(f"Incomplete results found in {result_file}")
+                                    print(
+                                        "Incomplete results" f" found in {result_file}"
+                                    )
                             else:
                                 continue
 
                         if args.dummy and result_file.exists():
                             result_file.unlink(missing_ok=True)
 
-                    kwarg_args = " ".join(
-                        [
-                            f"--{self.get_action_argument_name(args.action, k)} {v}"
-                            for k, v in zip(action.expand, kwarg_run)
-                        ]
-                    )
+                    kwarg_args = []
+                    for k, v in zip(action.expand, kwarg_run):
+                        arg = self.get_action_argument_name(args.action, k)
+                        kwarg_args.append(f"--{arg} {v}")
+                    kwarg_args = " ".join(kwarg_args)
                     run_arguments.append(f"{run_args} {kwarg_args}")
                     actual_runs += 1
             else:
@@ -480,7 +533,12 @@ class Experiment(ABC):
                 actual_runs += 1
 
         print(f"Total number of independent runs={len(run_arguments)}")
-        pass_args_on = f"--name {args.name} --expdir {args.expdir} --targetdir {args.targetdir} --config {args.config}"
+        pass_args_on = (
+            f"--name {args.name}"
+            f" --expdir {args.expdir}"
+            f" --targetdir {args.targetdir}"
+            f" --config {args.config}"
+        )
         if len(run_arguments) == 0:
             print("No runs to launch.")
             return
@@ -493,7 +551,7 @@ class Experiment(ABC):
 
         if args.runlocal and args.dummy:
             run_commands = [
-                f"{self._invocation} --action {args.action} {pass_args_on} run {r}"
+                f"{self._invocation} --action {args.action}" f" {pass_args_on} run {r}"
                 for r in run_arguments
             ]
             with mp.Pool(max(get_cpus() - 1, 1)) as pool:
@@ -503,6 +561,28 @@ class Experiment(ABC):
                     desc="Running locally",
                 ):
                     pass
+            return
+
+        if args.dummy and shutil.which("sbatch") is None:
+            answer = input(
+                "SLURM (sbatch) is not available on this system. "
+                "Run locally instead? [y/N] "
+            )
+            if answer.strip().lower() == "y":
+                run_commands = [
+                    f"{self._invocation} --action {args.action}"
+                    f" {pass_args_on} run {r}"
+                    for r in run_arguments
+                ]
+                with mp.Pool(max(get_cpus() - 1, 1)) as pool:
+                    for _ in tqdm(
+                        pool.imap_unordered(run_local_worker, run_commands),
+                        total=len(run_commands),
+                        desc="Running locally",
+                    ):
+                        pass
+            else:
+                print("Aborted.")
             return
 
         commands_per_task = max(1, getattr(args, "sbatch_commands_per_task", 1))
@@ -526,7 +606,7 @@ class Experiment(ABC):
             if getattr(args, "sbatch_array_limit", None) is not None:
                 sbatch_args[-1] += f"%{args.sbatch_array_limit}"
 
-            script = ["#!/usr/bin/bash"]
+            script = ["#!/bin/bash"]
             script += [f"#SBATCH {line}" for line in sbatch_args]
             script.append("")
             chunk_start_arg = chunk_start_task * commands_per_task
@@ -539,23 +619,31 @@ class Experiment(ABC):
             )
             script.append("")
             script.append(
-                "echo \"START runexperiment call at $(date '+%Y-%m-%d %H:%M:%S')\""
+                'echo "START runexperiment call at' " $(date '+%Y-%m-%d %H:%M:%S')\""
             )
             script.append(f"COMMANDS_PER_TASK={commands_per_task}")
             script.append("TOTAL_COMMANDS=${#experiment[@]}")
             script.append("task_start=$(( SLURM_ARRAY_TASK_ID * COMMANDS_PER_TASK ))")
             script.append("task_end=$(( task_start + COMMANDS_PER_TASK - 1 ))")
             script.append(
-                "for (( cmd_index=task_start; cmd_index<=task_end && cmd_index<TOTAL_COMMANDS; cmd_index++ )); do"
+                "for (( cmd_index=task_start;"
+                " cmd_index<=task_end &&"
+                " cmd_index<TOTAL_COMMANDS;"
+                " cmd_index++ )); do"
             )
             script.append(
-                f"    {self._invocation} --action {args.action} {pass_args_on} run ${{experiment[$cmd_index]}}"
+                f"    {self._invocation}"
+                f" --action {args.action}"
+                f" {pass_args_on}"
+                f" run ${{experiment[$cmd_index]}}"
             )
             script.append("done")
             if total_tasks > chunk_end_task + 1:
                 script.append("")
                 script.append(
-                    f'if [[ "$SLURM_ARRAY_TASK_ID" -eq {chunk_end_task - chunk_start_task} ]]\nthen'
+                    f'if [[ "$SLURM_ARRAY_TASK_ID" -eq'
+                    f" {chunk_end_task - chunk_start_task}"
+                    f" ]]\nthen"
                 )
                 script.append(f"\tsbatch launch_{timestamp}_{chunkid+1}.sh")
                 script.append("fi")
@@ -572,7 +660,8 @@ class Experiment(ABC):
                 print("\n".join(script))
             chunkid += 1
         print(
-            f"There were {possible_runs} possible runs of which {actual_runs} were queued."
+            f"There were {possible_runs} possible runs"
+            f" of which {actual_runs} were queued."
         )
 
     def run(self):
@@ -597,16 +686,29 @@ class Experiment(ABC):
                     raise ValueError(f"Expected the argument '{argument_name}'.")
                 action_arguments[argument] = getattr(args, argument_name)
 
+        cpu = psutil.cpu_percent()
+        mem = psutil.virtual_memory().percent
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
         print(
-            f"[START RUN] Current Time: {time.strftime('%Y-%m-%d %H:%M:%S')}, CPU Usage: {psutil.cpu_percent()}%, Memory Usage: {psutil.virtual_memory().percent}%"
+            f"[START RUN] Current Time: {ts},"
+            f" CPU Usage: {cpu}%,"
+            f" Memory Usage: {mem}%"
         )
 
         result = action.fn(
-            actual_experiment, self, **action_arguments, experiment_name=experiment_name
+            actual_experiment,
+            self,
+            **action_arguments,
+            experiment_name=experiment_name,
         )
 
+        cpu = psutil.cpu_percent()
+        mem = psutil.virtual_memory().percent
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
         print(
-            f"[END RUN] Current Time: {time.strftime('%Y-%m-%d %H:%M:%S')}, CPU Usage: {psutil.cpu_percent()}%, Memory Usage: {psutil.virtual_memory().percent}%"
+            f"[END RUN] Current Time: {ts},"
+            f" CPU Usage: {cpu}%,"
+            f" Memory Usage: {mem}%"
         )
 
         self.save_result(result, experiment, **action_arguments)
@@ -616,3 +718,27 @@ class Experiment(ABC):
 
     def pipeline(self):
         raise NotImplementedError
+
+    def init_config(self):
+        config_path = Path(self.args.config)
+        if config_path.exists():
+            print(f"{config_path} already exists. Nothing written.")
+            return
+        source = importlib.resources.files("runexperiment") / "config.yaml"
+        config_path.write_text(source.read_text())
+        print(f"Created {config_path}")
+
+    def truncate(self):
+        args = self.args
+        dirs = [d for d in (args.expdir, args.targetdir) if d.exists()]
+        if not dirs:
+            print("Nothing to remove: output and results directories do not exist.")
+            return
+        dir_list = ", ".join(str(d) for d in dirs)
+        answer = input(f"Remove {dir_list}? [y/N] ")
+        if answer.strip().lower() != "y":
+            print("Aborted.")
+            return
+        for d in dirs:
+            shutil.rmtree(d)
+            print(f"Removed {d}")

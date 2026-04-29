@@ -60,7 +60,13 @@ def test_launch_local_shows_progress_bar(monkeypatch, tmp_path):
 
     exp.launch()
 
-    expected_command = f"{exp._invocation} --action act --name demo --expdir {args.expdir} --targetdir {args.targetdir} --config {args.config} run --foo bar"
+    expected_command = (
+        f"{exp._invocation} --action act --name demo"
+        f" --expdir {args.expdir}"
+        f" --targetdir {args.targetdir}"
+        f" --config {args.config}"
+        f" run --foo bar"
+    )
     assert commands_seen["commands"] == [expected_command]
     assert commands_seen["processes"] == 3
     assert tqdm_calls["total"] == 1
