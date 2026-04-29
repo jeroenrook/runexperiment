@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from abc import ABC
 import importlib.resources
+import inspect
 import itertools
 import argparse
 import pickle
@@ -695,11 +696,15 @@ class Experiment(ABC):
             f" Memory Usage: {mem}%"
         )
 
+        params = inspect.signature(action.fn).parameters
+        accepts_experiment_name = "experiment_name" in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
         result = action.fn(
             actual_experiment,
             self,
             **action_arguments,
-            experiment_name=experiment_name,
+            **({"experiment_name": experiment_name} if accepts_experiment_name else {}),
         )
 
         cpu = psutil.cpu_percent()
