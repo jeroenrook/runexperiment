@@ -689,6 +689,9 @@ class Experiment(ABC):
         cpu = psutil.cpu_percent()
         mem = psutil.virtual_memory().percent
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        print(experiment)
+
         print(
             f"[START RUN] Current Time: {ts},"
             f" CPU Usage: {cpu}%,"
