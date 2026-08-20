@@ -65,76 +65,98 @@ class Experiment(ABC):
         elif modus == "truncate":
             self.truncate()
 
-    def _parse_arguments(self):
+    def _add_shared_arguments(self, parser, suppress_defaults=False):
         # Shared arguments that can appear before or after the subcommand.
-        shared = argparse.ArgumentParser(add_help=False)
+        #
+        # argparse parses subcommand arguments into a brand-new namespace
+        # and then unconditionally copies every key from it onto the
+        # already-populated top-level namespace. That means a subparser's
+        # own default for e.g. -a/--action always clobbers a value the
+        # user gave before the subcommand, unless the subparser's copy of
+        # the argument is prevented from supplying a default at all. When
+        # suppress_defaults is True (used for the subparser copies), each
+        # argument's default is set to argparse.SUPPRESS so an omitted
+        # flag leaves the namespace untouched instead of overwriting it.
+        def d(value):
+            return argparse.SUPPRESS if suppress_defaults else value
 
-        shared.add_argument("-c", "--config", default="config.yaml")
+        parser.add_argument("-c", "--config", default=d("config.yaml"))
 
-        shared.add_argument(
+        parser.add_argument(
             "-d",
             "--expdir",
             required=False,
-            default=None,
+            default=d(None),
             help="Base directory to store the experimental scripts in",
             type=Path,
         )
 
-        shared.add_argument(
+        parser.add_argument(
             "-t",
             "--targetdir",
             required=False,
-            default=None,
+            default=d(None),
             help="Base directory to store results of an experiment in",
             type=Path,
         )
 
-        shared.add_argument(
+        parser.add_argument(
             "--sbatch",
             required=False,
             nargs=2,
             action="append",
             dest="sbatch_args",
-            default=[],
+            default=d([]),
         )
 
-        shared.add_argument(
+        parser.add_argument(
             "--sbatch-array-limit",
             required=False,
             type=int,
             dest="sbatch_array_limit",
+            default=d(None),
         )
 
-        shared.add_argument(
+        parser.add_argument(
             "--sbatch-commands-per-task",
             required=False,
             type=int,
             dest="sbatch_commands_per_task",
+            default=d(None),
             help=(
                 "Number of run commands to execute sequentially"
                 " in a single SLURM array task."
             ),
         )
 
-        shared.add_argument(
+        parser.add_argument(
             "-n",
             "--name",
-            default=None,
+            default=d(None),
             required=False,
             help="Name of the experiment",
         )
 
-        shared.add_argument(
+        parser.add_argument(
             "-a",
             "--action",
-            default=list(self.action_space.keys())[0],
+            default=d(list(self.action_space.keys())[0]),
             choices=self.action_space.keys(),
             help="Available actions",
             dest="action",
         )
 
-        shared.set_defaults(dummy=True)
-        shared.add_argument("--dummy", action="store_false")
+        parser.add_argument("--dummy", action="store_false", default=d(True))
+
+    def _parse_arguments(self):
+        shared = argparse.ArgumentParser(add_help=False)
+        self._add_shared_arguments(shared, suppress_defaults=False)
+
+        # Subparsers get their own copy with suppressed defaults so that
+        # not passing a shared flag after the subcommand doesn't overwrite
+        # a value already parsed before it. See _add_shared_arguments.
+        shared_sub = argparse.ArgumentParser(add_help=False)
+        self._add_shared_arguments(shared_sub, suppress_defaults=True)
 
         parser = argparse.ArgumentParser(
             prog="Experiment Controller",
@@ -146,14 +168,14 @@ class Experiment(ABC):
             help="The experiment modus: [launch, run]", dest="modus"
         )
 
-        launch_parser = subparsers.add_parser("launch", parents=[shared])
-        run_parser = subparsers.add_parser("run", parents=[shared])
+        launch_parser = subparsers.add_parser("launch", parents=[shared_sub])
+        run_parser = subparsers.add_parser("run", parents=[shared_sub])
         subparsers.add_parser(
-            "init", parents=[shared], help="Create a default config.yaml"
+            "init", parents=[shared_sub], help="Create a default config.yaml"
         )
         subparsers.add_parser(
             "truncate",
-            parents=[shared],
+            parents=[shared_sub],
             help="Remove the output and results directories",
         )
 
