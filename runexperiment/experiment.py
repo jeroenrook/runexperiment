@@ -695,6 +695,8 @@ class Experiment(ABC):
             f" Memory Usage: {mem}%"
         )
 
+        print("Experiment parameters:", experiment)
+
         params = inspect.signature(action.fn).parameters
         accepts_experiment_name = "experiment_name" in params or any(
             p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
