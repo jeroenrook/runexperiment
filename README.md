@@ -54,3 +54,19 @@ python my_experiment.py run --action train --dataset a --seed 0
 
 See `runexperiment/experiment.py` for the full set of CLI options (including SLURM arguments) and an end-to-end example.
 When launching to SLURM, `--sbatch-commands-per-task N` will sequentially execute N run commands inside each array task (default 1) so you can reduce scheduler overhead.
+
+## Running inside a container (e.g. Apptainer)
+
+Every generated run command starts with the *invocation*: by default the
+interpreter and script that ran `launch`. To run each command inside a
+container instead, set it in `config.yaml` (or pass `--invocation`):
+
+```yaml
+invocation: "apptainer exec /abs/path/image.sif python /abs/path/my_experiment.py"
+```
+
+If `launch` itself runs inside the container, where `sbatch` is usually not
+available, add `--no-submit` (or `submit: false` in `config.yaml`): the launch
+scripts are written but not submitted, and the `sbatch` command to submit the
+first one is printed. Run that on the host; each script submits the next chunk
+itself.

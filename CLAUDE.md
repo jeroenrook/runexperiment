@@ -51,6 +51,8 @@ Calling `Experiment(exp_space, actions)` immediately runs `__init__` → `main()
 
 ### Config and CLI layering
 
+`invocation` (CLI `--invocation` or config key) replaces the auto-detected `python script.py` prefix of generated run commands (e.g. to run inside an Apptainer container); `--no-submit` / `submit: false` writes SLURM launch scripts without calling `sbatch` and prints the submit command.
+
 Arguments are resolved in this priority order (highest wins): CLI flags → `config.yaml` values → hardcoded defaults. The config file path defaults to `config.yaml` and is read in `_parse_arguments`. `sbatch` keys in the config file are merged with `--sbatch KEY VALUE` flags, with CLI flags taking precedence.
 
 ### Result storage layout
