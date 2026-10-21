@@ -49,6 +49,9 @@ class Experiment(ABC):
     # MAIN
     def main(self):
         self.args = self._parse_arguments()
+        invocation = getattr(self.args, "invocation", None)
+        if invocation:
+            self._invocation = invocation
 
         if self.args.modus is None:
             raise ValueError("Unknown experimental action!")
@@ -147,6 +150,27 @@ class Experiment(ABC):
         )
 
         parser.add_argument("--dummy", action="store_false", default=d(True))
+
+        parser.add_argument(
+            "--invocation",
+            default=d(None),
+            help=(
+                "Command that runs this experiment script in the generated"
+                " run commands, e.g. to run it inside a container. Defaults"
+                " to the current interpreter and script."
+            ),
+        )
+
+        parser.add_argument(
+            "--no-submit",
+            action="store_false",
+            dest="submit",
+            default=d(None),
+            help=(
+                "Write the SLURM launch scripts without submitting them,"
+                " e.g. when sbatch is not available where launch runs."
+            ),
+        )
 
     def _parse_arguments(self):
         shared = argparse.ArgumentParser(add_help=False)
@@ -585,7 +609,8 @@ class Experiment(ABC):
                     pass
             return
 
-        if args.dummy and shutil.which("sbatch") is None:
+        submit = getattr(args, "submit", None) is not False
+        if args.dummy and submit and shutil.which("sbatch") is None:
             answer = input(
                 "SLURM (sbatch) is not available on this system. "
                 "Run locally instead? [y/N] "
@@ -674,10 +699,12 @@ class Experiment(ABC):
                 with open(launch_name, "w") as fh:
                     fh.write("\n".join(script) + "\n")
                 Path(launch_name).chmod(0o755)
-                if chunkid == 0:
+                if chunkid == 0 and submit:
                     import subprocess
 
                     subprocess.run(["sbatch", launch_name])
+                elif chunkid == 0:
+                    print(f"Submit with: sbatch {Path(launch_name).resolve()}")
             else:
                 print("\n".join(script))
             chunkid += 1
